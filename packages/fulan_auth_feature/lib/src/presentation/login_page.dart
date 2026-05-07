@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../data/oidc/oidc_auth_repository.dart';
 import '../domain/auth_failure.dart';
 import '../domain/auth_repository.dart';
 
@@ -26,6 +27,8 @@ class _FulanLoginPageState extends State<FulanLoginPage> {
   bool _isSubmitting = false;
   String? _errorText;
 
+  bool get _isOidc => widget.authRepository is OidcAuthRepository;
+
   @override
   void dispose() {
     _emailController.dispose();
@@ -40,10 +43,15 @@ class _FulanLoginPageState extends State<FulanLoginPage> {
       _errorText = null;
     });
     try {
-      await widget.authRepository.signInWithEmailPassword(
-        email: _emailController.text,
-        password: _passwordController.text,
-      );
+      final repo = widget.authRepository;
+      if (repo is OidcAuthRepository) {
+        await repo.signIn();
+      } else {
+        await repo.signInWithEmailPassword(
+          email: _emailController.text,
+          password: _passwordController.text,
+        );
+      }
       widget.onSignedIn?.call();
     } on AuthFailure catch (e) {
       setState(() => _errorText = e.message);
@@ -70,21 +78,23 @@ class _FulanLoginPageState extends State<FulanLoginPage> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                TextField(
-                  controller: _emailController,
-                  keyboardType: TextInputType.emailAddress,
-                  autofillHints: const [AutofillHints.email],
-                  decoration: const InputDecoration(labelText: 'Email'),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _passwordController,
-                  obscureText: true,
-                  autofillHints: const [AutofillHints.password],
-                  decoration: const InputDecoration(labelText: 'Password'),
-                  onSubmitted: (_) => _signIn(),
-                ),
-                const SizedBox(height: 16),
+                if (!_isOidc) ...[
+                  TextField(
+                    controller: _emailController,
+                    keyboardType: TextInputType.emailAddress,
+                    autofillHints: const [AutofillHints.email],
+                    decoration: const InputDecoration(labelText: 'Email'),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _passwordController,
+                    obscureText: true,
+                    autofillHints: const [AutofillHints.password],
+                    decoration: const InputDecoration(labelText: 'Password'),
+                    onSubmitted: (_) => _signIn(),
+                  ),
+                  const SizedBox(height: 16),
+                ],
                 if (_errorText case final String msg)
                   Text(
                     msg,
@@ -101,7 +111,7 @@ class _FulanLoginPageState extends State<FulanLoginPage> {
                           height: 16,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : const Text('Sign in'),
+                      : Text(_isOidc ? 'Continue' : 'Sign in'),
                 ),
               ],
             ),

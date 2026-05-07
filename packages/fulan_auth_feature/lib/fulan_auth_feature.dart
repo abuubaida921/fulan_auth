@@ -1,5 +1,7 @@
 export 'src/data/http_auth_repository.dart';
 export 'src/data/mock_auth_repository.dart';
+export 'src/data/oidc/oidc_auth_repository.dart';
+export 'src/data/oidc/oidc_config.dart';
 export 'src/data/secure_session_storage.dart';
 export 'src/data/session_storage.dart';
 export 'src/domain/auth_failure.dart';

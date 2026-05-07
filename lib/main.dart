@@ -1,11 +1,31 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:fulan_auth_feature/fulan_auth_feature.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  final authRepository = MockAuthRepository(
-    sessionStorage: SecureSessionStorage(),
-  );
+
+  const clientId = String.fromEnvironment('FULAN_OIDC_CLIENT_ID');
+  const redirectUrl = String.fromEnvironment('FULAN_OIDC_REDIRECT_URL');
+
+  final sessionStorage = SecureSessionStorage();
+  final AuthRepository authRepository;
+
+  if (!kIsWeb && clientId.isNotEmpty && redirectUrl.isNotEmpty) {
+    authRepository = OidcAuthRepository(
+      config: OidcConfig(
+        discoveryUrl: Uri.parse(
+          'https://fulan.dawahtours.com/.well-known/openid-configuration',
+        ),
+        clientId: clientId,
+        redirectUrl: redirectUrl,
+      ),
+      sessionStorage: sessionStorage,
+    );
+  } else {
+    authRepository = MockAuthRepository(sessionStorage: sessionStorage);
+  }
+
   runApp(MyApp(authRepository: authRepository));
 }
 
