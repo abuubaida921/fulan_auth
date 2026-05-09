@@ -5,13 +5,30 @@ import 'package:fulan_auth_feature/fulan_auth_feature.dart';
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
 
-  const clientId = String.fromEnvironment('FULAN_OIDC_CLIENT_ID');
-  const redirectUrl = String.fromEnvironment('FULAN_OIDC_REDIRECT_URL');
+  const clientId = String.fromEnvironment(
+    'FULAN_OIDC_CLIENT_ID',
+    defaultValue: 'app_ceu1sVKY0I9loOsbkehDGw',
+  );
+  const webRedirectUrl = String.fromEnvironment(
+    'FULAN_OIDC_WEB_REDIRECT_URL',
+    defaultValue: 'http://localhost:3000/portal/callback',
+  );
+  const mobileRedirectUrl = String.fromEnvironment(
+    'FULAN_OIDC_MOBILE_REDIRECT_URL',
+    defaultValue: 'com.fulan.dawahtours.fulan_auth://oauthredirect',
+  );
+  final redirectUrl = kIsWeb ? webRedirectUrl : mobileRedirectUrl;
 
   final sessionStorage = SecureSessionStorage();
   final AuthRepository authRepository;
 
-  if (!kIsWeb && clientId.isNotEmpty && redirectUrl.isNotEmpty) {
+  final supportsOidc =
+      kIsWeb ||
+      defaultTargetPlatform == TargetPlatform.android ||
+      defaultTargetPlatform == TargetPlatform.iOS ||
+      defaultTargetPlatform == TargetPlatform.macOS;
+
+  if (supportsOidc && clientId.isNotEmpty && redirectUrl.isNotEmpty) {
     authRepository = OidcAuthRepository(
       config: OidcConfig(
         discoveryUrl: Uri.parse(
@@ -19,6 +36,7 @@ void main() {
         ),
         clientId: clientId,
         redirectUrl: redirectUrl,
+        scopes: const ['openid'],
       ),
       sessionStorage: sessionStorage,
     );

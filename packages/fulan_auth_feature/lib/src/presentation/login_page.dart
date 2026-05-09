@@ -111,7 +111,7 @@ class _FulanLoginPageState extends State<FulanLoginPage> {
                           height: 16,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : Text(_isOidc ? 'Continue' : 'Sign in'),
+                      : const Text('Sign in'),
                 ),
               ],
             ),
