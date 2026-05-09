@@ -28,6 +28,8 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        manifestPlaceholders["appAuthRedirectScheme"] = "com.fulan.dawahtours.fulan_auth"
     }
 
     buildTypes {
