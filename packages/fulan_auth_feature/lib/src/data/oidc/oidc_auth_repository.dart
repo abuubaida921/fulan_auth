@@ -15,6 +15,7 @@ import '../session_storage.dart';
 import 'oidc_app_auth.dart';
 import 'oidc_config.dart';
 import 'oidc_discovery_document.dart';
+import 'otp_models.dart';
 import 'web_platform.dart';
 
 final class OidcAuthRepository implements AuthRepository {
@@ -43,6 +44,91 @@ final class OidcAuthRepository implements AuthRepository {
 
   static const _pkceStateKey = 'fulan.oidc.pkce.state';
   static const _pkceVerifierKey = 'fulan.oidc.pkce.verifier';
+  static const _webLastErrorKey = 'fulan.oidc.last_error';
+
+  bool get requireVerifiedIdentifiers => _config.requireVerifiedIdentifiers;
+
+  String? consumeLastWebAuthError() {
+    if (!kIsWeb) return null;
+    final value = webPlatform.readSessionValue(_webLastErrorKey);
+    if (value == null || value.isEmpty) return null;
+    webPlatform.removeSessionValue(_webLastErrorKey);
+    return value;
+  }
+
+  Future<AuthSession> signInWithVerifiedIdentifier({
+    required String identifierType,
+    required String identifierValue,
+  }) {
+    return _signInInternal(
+      identifierType: identifierType,
+      identifierValue: identifierValue,
+    );
+  }
+
+  Future<OtpSendResult> requestOtp({
+    required String identifierType,
+    required String identifierValue,
+  }) async {
+    final discovery = await _getDiscovery();
+    final uri = discovery.issuer.resolve('/otp/send');
+
+    late final http.Response response;
+    try {
+      response = await _httpClient.post(
+        uri,
+        headers: const {'content-type': 'application/json'},
+        body: jsonEncode({
+          'client_id': _config.clientId,
+          'identifier_type': identifierType,
+          'identifier_value': identifierValue,
+        }),
+      );
+    } catch (_) {
+      throw const NetworkFailure();
+    }
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw ServerFailure('OTP send error (${response.statusCode})');
+    }
+
+    final decoded = jsonDecode(response.body);
+    if (decoded is! Map) {
+      throw const UnknownAuthFailure('Malformed otp/send response');
+    }
+
+    return OtpSendResult.fromJson(Map<String, Object?>.from(decoded));
+  }
+
+  Future<void> verifyOtp({required String otpId, required String code}) async {
+    final discovery = await _getDiscovery();
+    final uri = discovery.issuer.resolve('/otp/verify');
+
+    late final http.Response response;
+    try {
+      response = await _httpClient.post(
+        uri,
+        headers: const {'content-type': 'application/json'},
+        body: jsonEncode({
+          'client_id': _config.clientId,
+          'otp_id': otpId,
+          'code': code,
+        }),
+      );
+    } catch (_) {
+      throw const NetworkFailure();
+    }
+
+    if (response.statusCode == 204) return;
+    if (response.statusCode == 400) {
+      throw const OtpInvalidFailure();
+    }
+    if (response.statusCode == 429) {
+      throw const OtpRateLimitedFailure();
+    }
+
+    throw ServerFailure('OTP verify error (${response.statusCode})');
+  }
 
   Future<void> initialize() async {
     if (_initialized) return;
@@ -82,10 +168,34 @@ final class OidcAuthRepository implements AuthRepository {
   }
 
   Future<AuthSession> signIn() async {
+    return _signInInternal(
+      identifierType: _config.identifierType,
+      identifierValue: _config.identifierValue,
+    );
+  }
+
+  Future<AuthSession> _signInInternal({
+    required String? identifierType,
+    required String? identifierValue,
+  }) async {
     await initialize();
     if (kIsWeb) {
-      await _startWebSignIn();
+      await _startWebSignIn(
+        identifierType: identifierType,
+        identifierValue: identifierValue,
+      );
       throw const UnknownAuthFailure('Redirecting to sign-in');
+    }
+
+    if (_config.requireVerifiedIdentifiers) {
+      if (identifierType == null ||
+          identifierType.isEmpty ||
+          identifierValue == null ||
+          identifierValue.isEmpty) {
+        throw const UnknownAuthFailure(
+          'Missing verified identifier (identifier_type / identifier_value)',
+        );
+      }
     }
 
     final discovery = await _getDiscovery();
@@ -93,6 +203,12 @@ final class OidcAuthRepository implements AuthRepository {
       authorizationEndpoint: discovery.authorizationEndpoint.toString(),
       tokenEndpoint: discovery.tokenEndpoint.toString(),
     );
+
+    final additionalParameters = <String, String>{};
+    if (_config.requireVerifiedIdentifiers) {
+      additionalParameters['identifier_type'] = identifierType!;
+      additionalParameters['identifier_value'] = identifierValue!;
+    }
 
     late final AuthorizationTokenResponse? response;
     try {
@@ -102,17 +218,30 @@ final class OidcAuthRepository implements AuthRepository {
           _config.redirectUrl,
           serviceConfiguration: serviceConfiguration,
           scopes: _config.scopes,
+          additionalParameters: additionalParameters.isEmpty
+              ? null
+              : additionalParameters,
         ),
       );
     } on FlutterAppAuthUserCancelledException catch (_) {
       throw const UnknownAuthFailure('Sign-in cancelled');
     } on FlutterAppAuthPlatformException catch (e) {
       final details = e.platformErrorDetails;
+      final error = details.error;
+      final description =
+          details.errorDescription ?? details.errorDebugDescription;
+      if (description != null &&
+          description.toLowerCase().contains('identifier_not_verified')) {
+        throw const VerificationRequiredFailure('Identifier not verified');
+      }
+      if (error == 'invalid_request') {
+        throw InvalidRequestFailure(description ?? 'Invalid request');
+      }
+      if (error == 'access_denied' && description != null) {
+        throw UnknownAuthFailure(description);
+      }
       throw UnknownAuthFailure(
-        details.errorDescription ??
-            details.error ??
-            e.message ??
-            'Sign-in failed',
+        description ?? error ?? e.message ?? 'Sign-in failed',
       );
     }
 
@@ -269,7 +398,10 @@ final class OidcAuthRepository implements AuthRepository {
     );
   }
 
-  Future<void> _startWebSignIn() async {
+  Future<void> _startWebSignIn({
+    required String? identifierType,
+    required String? identifierValue,
+  }) async {
     final discovery = await _getDiscovery();
 
     final verifier = _randomUrlSafeString(48);
@@ -279,16 +411,31 @@ final class OidcAuthRepository implements AuthRepository {
     webPlatform.writeSessionValue(_pkceVerifierKey, verifier);
     webPlatform.writeSessionValue(_pkceStateKey, state);
 
+    final queryParameters = <String, String>{
+      'response_type': 'code',
+      'client_id': _config.clientId,
+      'redirect_uri': _config.redirectUrl,
+      'scope': _config.scopes.join(' '),
+      'code_challenge': challenge,
+      'code_challenge_method': 'S256',
+      'state': state,
+    };
+
+    if (_config.requireVerifiedIdentifiers) {
+      if (identifierType == null ||
+          identifierType.isEmpty ||
+          identifierValue == null ||
+          identifierValue.isEmpty) {
+        throw const UnknownAuthFailure(
+          'Missing verified identifier (identifier_type / identifier_value)',
+        );
+      }
+      queryParameters['identifier_type'] = identifierType;
+      queryParameters['identifier_value'] = identifierValue;
+    }
+
     final authorizeUri = discovery.authorizationEndpoint.replace(
-      queryParameters: {
-        'response_type': 'code',
-        'client_id': _config.clientId,
-        'redirect_uri': _config.redirectUrl,
-        'scope': _config.scopes.join(' '),
-        'code_challenge': challenge,
-        'code_challenge_method': 'S256',
-        'state': state,
-      },
+      queryParameters: {...queryParameters},
     );
 
     webPlatform.redirectTo(authorizeUri.toString());
@@ -300,6 +447,7 @@ final class OidcAuthRepository implements AuthRepository {
     final code = params['code'];
     final returnedState = params['state'];
     final error = params['error'];
+    final errorDescription = params['error_description'];
 
     if (code == null && error == null) return;
 
@@ -313,6 +461,10 @@ final class OidcAuthRepository implements AuthRepository {
     webPlatform.replaceUrl(cleaned.toString());
 
     if (error != null) {
+      final message = errorDescription == null || errorDescription.isEmpty
+          ? error
+          : '$error: $errorDescription';
+      webPlatform.writeSessionValue(_webLastErrorKey, message);
       return;
     }
 
@@ -321,6 +473,7 @@ final class OidcAuthRepository implements AuthRepository {
         expectedState == null ||
         verifier == null ||
         returnedState != expectedState) {
+      webPlatform.writeSessionValue(_webLastErrorKey, 'Invalid login state');
       return;
     }
 
@@ -368,18 +521,17 @@ final class OidcAuthRepository implements AuthRepository {
   }) async {
     late final http.Response response;
     try {
+      final bodyParams = <String, String>{
+        'grant_type': 'authorization_code',
+        'client_id': _config.clientId,
+        'code': code,
+        'redirect_uri': _config.redirectUrl,
+        'code_verifier': codeVerifier,
+      };
       response = await _httpClient.post(
         tokenEndpoint,
         headers: const {'content-type': 'application/x-www-form-urlencoded'},
-        body: Uri(
-          queryParameters: {
-            'grant_type': 'authorization_code',
-            'client_id': _config.clientId,
-            'code': code,
-            'redirect_uri': _config.redirectUrl,
-            'code_verifier': codeVerifier,
-          },
-        ).query,
+        body: Uri(queryParameters: {...bodyParams}).query,
       );
     } catch (_) {
       throw const NetworkFailure();

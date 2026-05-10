@@ -19,6 +19,22 @@ final class ServerFailure extends AuthFailure {
   const ServerFailure([super.message = 'Server error']);
 }
 
+final class VerificationRequiredFailure extends AuthFailure {
+  const VerificationRequiredFailure(super.message);
+}
+
+final class OtpInvalidFailure extends AuthFailure {
+  const OtpInvalidFailure([super.message = 'Invalid OTP']);
+}
+
+final class OtpRateLimitedFailure extends AuthFailure {
+  const OtpRateLimitedFailure([super.message = 'Rate limited']);
+}
+
+final class InvalidRequestFailure extends AuthFailure {
+  const InvalidRequestFailure([super.message = 'Invalid request']);
+}
+
 final class UnknownAuthFailure extends AuthFailure {
   const UnknownAuthFailure([super.message = 'Unknown error']);
 }

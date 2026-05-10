@@ -17,6 +17,18 @@ void main() {
     'FULAN_OIDC_MOBILE_REDIRECT_URL',
     defaultValue: 'com.fulan.dawahtours.fulan_auth://oauthredirect',
   );
+  const requireVerifiedIdentifiers = bool.fromEnvironment(
+    'FULAN_OIDC_REQUIRE_VERIFIED_IDENTIFIERS',
+    defaultValue: true,
+  );
+  const identifierType = String.fromEnvironment(
+    'FULAN_OIDC_IDENTIFIER_TYPE',
+    defaultValue: '',
+  );
+  const identifierValue = String.fromEnvironment(
+    'FULAN_OIDC_IDENTIFIER_VALUE',
+    defaultValue: '',
+  );
   final redirectUrl = kIsWeb ? webRedirectUrl : mobileRedirectUrl;
 
   final sessionStorage = SecureSessionStorage();
@@ -37,6 +49,9 @@ void main() {
         clientId: clientId,
         redirectUrl: redirectUrl,
         scopes: const ['openid'],
+        requireVerifiedIdentifiers: requireVerifiedIdentifiers,
+        identifierType: identifierType.isEmpty ? null : identifierType,
+        identifierValue: identifierValue.isEmpty ? null : identifierValue,
       ),
       sessionStorage: sessionStorage,
     );

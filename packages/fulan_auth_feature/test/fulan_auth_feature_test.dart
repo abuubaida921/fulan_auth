@@ -6,7 +6,6 @@ void main() {
     final session = AuthSession(
       user: const AuthUser(id: 'u1', email: 'a@b.com'),
       accessToken: 'access',
-      refreshToken: 'refresh',
       expiresAt: DateTime.parse('2030-01-01T00:00:00.000Z'),
     );
 
@@ -14,7 +13,7 @@ void main() {
     expect(restored.user.id, 'u1');
     expect(restored.user.email, 'a@b.com');
     expect(restored.accessToken, 'access');
-    expect(restored.refreshToken, 'refresh');
+    expect(restored.refreshToken, isNull);
     expect(
       restored.expiresAt.toUtc().toIso8601String(),
       '2030-01-01T00:00:00.000Z',
